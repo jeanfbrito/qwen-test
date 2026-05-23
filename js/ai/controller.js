@@ -70,10 +70,18 @@ class AIController {
         break;
     }
 
-    // Interrupt: react to being shot — decide to fight back or run for cover
+    // React to being shot — decide to fight back or keep running
     if (bot.alive && bot.lastDamageTime > 0 && this.game.time - bot.lastDamageTime < 0.5) {
       bot.lastDamageTime = 0;
-      if (bot.state !== STATES.ATTACKING && bot.state !== STATES.SEEKING_COVER && bot.state !== STATES.FLEEING) {
+      if (bot.state === STATES.SEEKING_COVER) {
+        // Got shot while running for cover — stop and fight back
+        if (bot.health < 20 || bot.personality === 'Coward') {
+          // Too hurt — keep running for cover
+        } else {
+          bot.state = STATES.ATTACKING;
+          bot.target = bot.attacker;
+        }
+      } else if (bot.state !== STATES.ATTACKING && bot.state !== STATES.FLEEING) {
         if (bot.health < 30 || bot.personality === 'Coward') {
           bot.state = STATES.SEEKING_COVER;
         } else if (bot.personality === 'Sniper') {
@@ -511,8 +519,9 @@ class AIController {
       bot.pathIndex++;
       return;
     }
-    let moveX = (dx / d) * bot.speed * (1 / 60);
-    let moveY = (dy / d) * bot.speed * (1 / 60);
+    let speedMult = (bot.state === STATES.FLEEING || bot.state === STATES.SEEKING_COVER) ? 1.8 : 1;
+    let moveX = (dx / d) * bot.speed * speedMult * (1 / 60);
+    let moveY = (dy / d) * bot.speed * speedMult * (1 / 60);
     let oldX = bot.x;
     let oldY = bot.y;
     this.tryMove(bot, moveX, moveY);
