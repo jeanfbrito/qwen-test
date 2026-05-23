@@ -17,7 +17,7 @@ class Game {
     this.running = false;
     this.paused = false;
     this.debug = false;
-    this.speed = 3;
+    this.speed = 1;
     this.matchTime = 0;
     this.seed = Math.floor(Math.random() * 99999);
     this.winner = null;
