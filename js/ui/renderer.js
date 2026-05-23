@@ -12,6 +12,7 @@ class Renderer {
     let ctx = this.ctx;
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     this.drawMap();
+    this.drawBloodSplats();
     this.drawBullets();
     this.drawBots();
     if (this.game.debug) this.drawDebug();
@@ -85,6 +86,19 @@ class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText(bot.name, x, y + bot.radius + 10);
     }
+  }
+  drawBloodSplats() {
+    let ctx = this.ctx;
+    for (let s of (this.game.bloodSplats || [])) {
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = s.c;
+      for (let d of s.drops) {
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
   }
   drawBullets() {
     let ctx = this.ctx;

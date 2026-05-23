@@ -30,6 +30,7 @@ class Game {
     this.map = new GameMap(this.seed);
     this.bots = [];
     this.bullets = [];
+    this.bloodSplats = [];
     this.log.clear();
     this.matchTime = 0;
     this.winner = null;

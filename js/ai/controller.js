@@ -648,6 +648,7 @@ class AIController {
       hitBot.target = bullet.shooter;
       hitBot.lastDamageTime = this.game.time;
       this.game.log.add(`${bullet.shooter.name} hit ${hitBot.name} for ${damage.toFixed(0)} dmg`, 'hit');
+      this.addBloodSplat(hitBot.x, hitBot.y, 5);
 
       if (hitBot.health <= 0) {
         hitBot.health = 0;
@@ -656,6 +657,7 @@ class AIController {
         hitBot.deathKiller = bullet.shooter.name;
         bullet.shooter.kills++;
         this.game.log.add(`${bullet.shooter.name} killed ${hitBot.name}!`, 'kill');
+        this.addBloodSplat(hitBot.x, hitBot.y, 20);
       }
 
       if (hitBot.alive && hitBot.state !== STATES.Dead) {
@@ -676,6 +678,18 @@ class AIController {
         }
       }
     }
+  }
+
+  addBloodSplat(x, y, count) {
+    let drops = [];
+    for (let i = 0; i < count; i++) {
+      drops.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y + (Math.random() - 0.5) * 20,
+        r: 1 + Math.random() * 2.5
+      });
+    }
+    this.game.bloodSplats.push({ drops, a: 0.7 + Math.random() * 0.3, c: '#8b0000' });
   }
 
   recoverFromStuck(bot) {
