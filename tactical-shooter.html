@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tactical Bot Shooter</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#top-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #16213e; border-bottom: 1px solid #0f3460; flex-wrap: wrap; }
+#top-bar button { padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+#btn-start { background: #e94560; color: white; }
+#btn-pause { background: #f0a500; color: #1a1a2e; }
+#btn-restart { background: #533483; color: white; }
+#top-bar label { font-size: 13px; display: flex; align-items: center; gap: 4px; }
+#top-bar input[type=range] { width: 80px; }
+#top-bar .stat { font-size: 13px; color: #a0a0c0; }
+#main { display: flex; flex: 1; overflow: hidden; }
+#canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 8px; }
+canvas { background: #0a0a1a; border: 1px solid #0f3460; border-radius: 4px; }
+#sidebar { width: 320px; display: flex; flex-direction: column; border-left: 1px solid #0f3460; background: #16213e; overflow: hidden; }
+#bots-panel { flex: 1; overflow-y: auto; padding: 8px; }
+#bots-panel h3 { font-size: 13px; color: #a0a0c0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+.bot-card { background: #1a1a2e; border-radius: 4px; padding: 6px 8px; margin-bottom: 4px; font-size: 11px; border-left: 3px solid #555; }
+.bot-card.dead { opacity: 0.45; }
+.bot-card .bot-name { font-weight: 700; font-size: 12px; }
+.bot-card .bot-info { display: flex; justify-content: space-between; color: #888; margin-top: 2px; }
+.bot-card .health-bar { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
+.bot-card .health-fill { height: 100%; border-radius: 2px; transition: width 0.2s; }
+#log-panel { height: 160px; border-top: 1px solid #0f3460; overflow-y: auto; padding: 6px 8px; background: #0d1117; }
+#log-panel h3 { font-size: 12px; color: #a0a0c0; margin-bottom: 4px; }
+.log-entry { font-size: 11px; color: #8b949e; margin-bottom: 2px; font-family: monospace; }
+.log-entry.kill { color: #e94560; }
+.log-entry.hit { color: #f0a500; }
+.log-entry.cover { color: #58a6ff; }
+.log-entry.win { color: #3fb950; font-weight: bold; }
+#ranking-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+#ranking-overlay.show { display: flex; }
+#ranking-box { background: #16213e; border: 2px solid #e94560; border-radius: 8px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; }
+#ranking-box h2 { text-align: center; color: #e94560; margin-bottom: 4px; }
+#ranking-box .winner-name { text-align: center; font-size: 20px; color: #f0a500; margin-bottom: 12px; }
+#ranking-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#ranking-table th { background: #0d1117; padding: 6px 4px; text-align: left; color: #a0a0c0; font-size: 11px; }
+#ranking-table td { padding: 5px 4px; border-bottom: 1px solid #21262d; }
+#ranking-table tr:first-child td { color: #f0a500; font-weight: bold; }
+#ranking-table .most-kills { color: #e94560; }
+#btn-close-ranking { display: block; margin: 12px auto 0; padding: 8px 24px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="top-bar">
+  <button id="btn-start">Start</button>
+  <button id="btn-pause">Pause</button>
+  <button id="btn-restart">Restart</button>
+  <label>Speed: <input type="range" id="speed-slider" min="1" max="10" value="3"> <span id="speed-val">3x</span></label>
+  <label><input type="checkbox" id="debug-check"> Debug</label>
+  <span class="stat">Timer: <span id="timer">0:00</span></span>
+  <span class="stat">Alive: <span id="alive-count">0</span>/10</span>
+  <span class="stat">Seed: <span id="seed-display">-</span></span>
+</div>
+<div id="main">
+  <div id="canvas-wrap"><canvas id="game-canvas"></canvas></div>
+  <div id="sidebar">
+    <div id="bots-panel"><h3>Bots</h3><div id="bot-list"></div></div>
+    <div id="log-panel"><h3>Event Log</h3><div id="log-list"></div></div>
+  </div>
+</div>
+<div id="ranking-overlay">
+  <div id="ranking-box">
+    <h2>Match Over</h2>
+    <div class="winner-name" id="winner-display"></div>
+    <table id="ranking-table"></table>
+    <button id="btn-close-ranking">Close</button>
+  </div>
+</div>
+
+<script>
+// ======================== SEEDED RANDOM ========================
+class SeededRandom {
+  constructor(seed) { this.seed = seed % 2147483647; if (this.seed <= 0) this.seed += 2147483646; }
+  next() { this.seed = (this.seed * 16807) % 2147483647; return (this.seed - 1) / 2147483646; }
+  nextInt(min, max) { return Math.floor(this.next() * (max - min + 1)) + min; }
+  pick(arr) { return arr[this.nextInt(0, arr.length - 1)]; }
+}
+
+// ======================== CONSTANTS ========================
+const TILE = 32;
+const MAP_W = 50;
+const MAP_H = 38;
+const CANVAS_W = MAP_W * TILE;
+const CANVAS_H = MAP_H * TILE;
+const PERSONALITIES = ['Aggressive', 'Defensive', 'Coward', 'Balanced', 'Sniper'];
+const BOT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliet'];
+const BOT_COLORS = ['#ff6b6b','#ffa502','#ffdd59','#7bed9f','#70a1ff','#5352ed','#a55eea','#ff6348','#2ed573','#e056fd'];
+const STATES = { EXPLORING:0, SEEKING_ENEMY:1, CHASING:2, ATTACKING:3, SEEKING_COVER:4, IN_COVER:5, FLEEING:6, DEAD:7 };
+const STATE_NAMES = ['EXPLORING','SEEKING_ENEMY','CHASING','ATTACKING','SEEKING_COVER','IN_COVER','FLEEING','DEAD'];
+const TILE_FLOOR=0, TILE_WALL=1, TILE_COVER=2;
+
+// ======================== EVENT LOG ========================
+class EventLog {
+  constructor() { this.entries = []; }
+  add(text, type) { this.entries.push({ t: performance.now(), text, type: type || '' }); }
+  clear() { this.entries = []; }
+}
+
+// ======================== GAME MAP ========================
+class GameMap {
+  constructor(seed) {
+    this.rng = new SeededRandom(seed);
+    this.grid = [];
+    this.coverList = [];
+    this.walkableSpawns = [];
+    this.generate();
+  }
+  generate() {
+    // Fill with walls
+    for (let y = 0; y < MAP_H; y++) {
+      this.grid[y] = [];
+      for (let x = 0; x < MAP_W; x++) this.grid[y][x] = TILE_WALL;
+    }
+    // Carve rooms using BSP-like approach
+    this.carveRooms(1, 1, MAP_W - 2, MAP_H - 2, 4);
+    // Place cover objects in open areas
+    this.placeCover();
+    // Collect spawn candidates
+    this.walkableSpawns = [];
+    for (let y = 2; y < MAP_H - 2; y++)
+      for (let x = 2; x < MAP_W - 2; x++)
+        if (this.grid[y][x] === TILE_FLOOR) this.walkableSpawns.push({x, y});
+  }
+  carveRooms(x1, y1, w, h, depth) {
+    if (depth <= 0 || w < 6 || h < 6) {
+      // Carve a room
+      let rw = Math.min(w, this.rng.nextInt(5, Math.min(12, w)));
+      let rh = Math.min(h, this.rng.nextInt(5, Math.min(10, h)));
+      let rx = x1 + this.rng.nextInt(0, Math.max(0, w - rw));
+      let ry = y1 + this.rng.nextInt(0, Math.max(0, h - rh));
+      for (let y = ry; y < ry + rh && y < MAP_H - 1; y++)
+        for (let x = rx; x < rx + rw && x < MAP_W - 1; x++)
+          this.grid[y][x] = TILE_FLOOR;
+      return;
+    }
+    // Split horizontally or vertically
+    if (w > h && w > 12) {
+      let split = x1 + this.rng.nextInt(Math.ceil(w * 0.3), Math.floor(w * 0.7));
+      // Leave corridor
+      let cy = y1 + this.rng.nextInt(0, Math.max(0, h - 3));
+      for (let y = Math.max(y1, cy); y < Math.min(y1 + h, cy + 3); y++)
+        for (let x = x1; x < x1 + w; x++)
+          if (y >= 0 && y < MAP_H && x >= 0 && x < MAP_W) this.grid[y][x] = TILE_FLOOR;
+      this.carveRooms(x1, y1, split - x1, h, depth - 1);
+      this.carveRooms(split, y1, x1 + w - split, h, depth - 1);
+    } else if (h > 10) {
+      let split = y1 + this.rng.nextInt(Math.ceil(h * 0.3), Math.floor(h * 0.7));
+      let cx = x1 + this.rng.nextInt(0, Math.max(0, w - 3));
+      for (let x = Math.max(x1, cx); x < Math.min(x1 + w, cx + 3); x++)
+        for (let y = y1; y < y1 + h; y++)
+          if (y >= 0 && y < MAP_H && x >= 0 && x < MAP_W) this.grid[y][x] = TILE_FLOOR;
+      this.carveRooms(x1, y1, w, split - y1, depth - 1);
+      this.carveRooms(x1, split, w, y1 + h - split, depth - 1);
+    } else {
+      let rw = this.rng.nextInt(4, Math.min(10, w));
+      let rh = this.rng.nextInt(4, Math.min(8, h));
+      let rx = x1 + this.rng.nextInt(0, Math.max(0, w - rw));
+      let ry = y1 + this.rng.nextInt(0, Math.max(0, h - rh));
+      for (let y = ry; y < ry + rh && y < MAP_H - 1; y++)
+        for (let x = rx; x < rx + rw && x < MAP_W - 1; x++)
+          this.grid[y][x] = TILE_FLOOR;
+    }
+  }
+  placeCover() {
+    this.coverList = [];
+    let count = this.rng.nextInt(40, 70);
+    for (let i = 0; i < count; i++) {
+      let x = this.rng.nextInt(2, MAP_W - 3);
+      let y = this.rng.nextInt(2, MAP_H - 3);
+      if (this.grid[y][x] === TILE_FLOOR) {
+        this.grid[y][x] = TILE_COVER;
+        this.coverList.push({x, y});
+      }
+    }
+  }
+  isWalkable(x, y) {
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
+    return this.grid[y][x] !== TILE_WALL;
+  }
+  isWall(x, y) {
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
+    return this.grid[y][x] === TILE_WALL;
+  }
+  isCover(x, y) {
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
+    return this.grid[y][x] === TILE_COVER;
+  }
+  isBlocked(x, y) {
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
+    return this.grid[y][x] !== TILE_FLOOR;
+  }
+  // Bresenham line of sight
+  hasLineOfSight(x1, y1, x2, y2) {
+    let dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+    let sx = x1 < x2 ? 1 : -1, sy = y1 < y2 ? 1 : -1;
+    let err = dx - dy;
+    let cx = x1, cy = y1;
+    while (true) {
+      if (cx === x2 && cy === y2) return true;
+      if (cx < 0 || cx >= MAP_W || cy < 0 || cy >= MAP_H) return false;
+      if (this.grid[cy][cx] !== TILE_FLOOR) {
+        if (!(cx === x1 && cy === y1)) return false;
+      }
+      let e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; cx += sx; }
+      if (e2 < dx) { err += dx; cy += sy; }
+    }
+  }
+  // BFS pathfinding
+  bfs(sx, sy, tx, ty) {
+    if (sx === tx && sy === ty) return [{x: sx, y: sy}];
+    if (!this.isWalkable(tx, ty)) return null;
+    let visited = new Uint8Array(MAP_W * MAP_H);
+    let parent = new Int32Array(MAP_W * MAP_H * 2);
+    let idx = (x, y) => y * MAP_W + x;
+    let q = [sx + ',' + sy];
+    visited[idx(sx, sy)] = 1;
+    let dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    while (q.length > 0) {
+      let [cx, cy] = q.shift().split(',').map(Number);
+      for (let [dx, dy] of dirs) {
+        let nx = cx + dx, ny = cy + dy;
+        let ni = idx(nx, ny);
+        if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) continue;
+        if (visited[ni]) continue;
+        if (!this.isWalkable(nx, ny)) continue;
+        // For diagonals, check both adjacent tiles
+        if (dx !== 0 && dy !== 0) {
+          if (!this.isWalkable(cx + dx, cy) || !this.isWalkable(cx, cy + dy)) continue;
+        }
+        visited[ni] = 1;
+        parent[ni * 2] = cx;
+        parent[ni * 2 + 1] = cy;
+        if (nx === tx && ny === ty) {
+          // Reconstruct path
+          let path = [{x: nx, y: ny}];
+          let px = nx, py = ny;
+          while (px !== sx || py !== sy) {
+            let pi = idx(px, py);
+            let ppx = parent[pi * 2], ppy = parent[pi * 2 + 1];
+            path.unshift({x: ppx, y: ppy});
+            px = ppx; py = ppy;
+          }
+          return path;
+        }
+        q.push(nx + ',' + ny);
+      }
+    }
+    return null;
+  }
+}
+
+// ======================== BULLET ========================
+class Bullet {
+  constructor(x, y, tx, ty, shooter) {
+    this.x = x; this.y = y;
+    this.tx = tx; this.ty = ty;
+    this.shooter = shooter;
+    this.alive = true;
+    this.hit = false;
+    this.hitTarget = null;
+    this.trail = [{x, y}];
+  }
+}
+
+// ======================== BOT ========================
+class Bot {
+  constructor(id, x, y, personality, color) {
+    this.id = id;
+    this.name = BOT_NAMES[id];
+    this.color = color;
+    this.personality = personality;
+    this.x = x; this.y = y; // pixel coords (center)
+    this.tileX = Math.floor(x / TILE);
+    this.tileY = Math.floor(y / TILE);
+    this.health = 100;
+    this.maxHealth = 100;
+    this.speed = 60 + Math.random() * 30;
+    this.alive = true;
+    this.state = STATES.EXPLORING;
+    this.target = null;
+    this.attacker = null;
+    this.lastEnemyPos = null;
+    this.kills = 0;
+    this.survivalTime = 0;
+    this.cooldown = 0;
+    this.cooldownMax = 0.4 + Math.random() * 0.3;
+    this.visionRadius = 150 + Math.random() * 80;
+    this.weaponRange = 200 + Math.random() * 80;
+    this.destination = null;
+    this.path = [];
+    this.pathIndex = 0;
+    this.stuckTimer = 0;
+    this.lastMoveX = x;
+    this.lastMoveY = y;
+    this.coverTile = null;
+    this.peekTimer = 0;
+    this.direction = Math.random() * Math.PI * 2;
+    this.radius = 10;
+    this.deathKiller = null;
+    this.lastShotTime = 0;
+    this.shotAccuracy = 0.7 + Math.random() * 0.25;
+  }
+}
+
+// ======================== AI CONTROLLER ========================
+class AIController {
+  constructor(game) { this.game = game; }
+
+  update(bot, dt) {
+    if (!bot.alive) { bot.state = STATES.DEAD; return; }
+    if (bot.cooldown > 0) bot.cooldown -= dt;
+
+    // Update survival time
+    bot.survivalTime += dt;
+
+    // Detect enemies
+    let visibleEnemies = this.detectEnemies(bot);
+    let closestVisible = null;
+    let closestDist = Infinity;
+    for (let e of visibleEnemies) {
+      let d = this.game.dist(bot, e);
+      if (d < closestDist) { closestDist = d; closestVisible = e; }
+    }
+
+    // Update last enemy position if we see someone
+    if (closestVisible) {
+      bot.lastEnemyPos = { x: closestVisible.x, y: closestVisible.y };
+    }
+
+    // State machine
+    switch (bot.state) {
+      case STATES.EXPLORING:
+        this.doExploring(bot, closestVisible, closestDist);
+        break;
+      case STATES.SEEKING_ENEMY:
+        this.doSeekingEnemy(bot, closestVisible, closestDist);
+        break;
+      case STATES.CHASING:
+        this.doChasing(bot, closestVisible, closestDist);
+        break;
+      case STATES.ATTACKING:
+        this.doAttacking(bot, closestVisible, closestDist);
+        break;
+      case STATES.SEEKING_COVER:
+        this.doSeekingCover(bot);
+        break;
+      case STATES.IN_COVER:
+        this.doInCover(bot, closestVisible, closestDist);
+        break;
+      case STATES.FLEEING:
+        this.doFleeing(bot);
+        break;
+    }
+
+    // Force state change if health critical
+    if (bot.alive && bot.health <= 15 && bot.state !== STATES.FLEEING && bot.state !== STATES.Dead && bot.state !== STATES.SEEKING_COVER) {
+      bot.state = STATES.FLEEING;
+      game.log.add(`${bot.name} is fleeing (critical health)`, 'cover');
+    }
+
+    // Update tile position
+    bot.tileX = Math.floor(bot.x / TILE);
+    bot.tileY = Math.floor(bot.y / TILE);
+
+    // Stuck detection
+    let moved = Math.abs(bot.x - bot.lastMoveX) + Math.abs(bot.y - bot.lastMoveY);
+    if (moved < 0.5) {
+      bot.stuckTimer += dt;
+      if (bot.stuckTimer > 3) {
+        this.recoverFromStuck(bot);
+      }
+    } else {
+      bot.stuckTimer = 0;
+      bot.lastMoveX = bot.x;
+      bot.lastMoveY = bot.y;
+    }
+  }
+
+  detectEnemies(bot) {
+    let enemies = [];
+    for (let other of this.game.bots) {
+      if (other === bot || !other.alive) continue;
+      let d = this.game.dist(bot, other);
+      if (d > bot.visionRadius) continue;
+      // Check line of sight in tiles
+      let t1x = Math.floor(bot.x / TILE), t1y = Math.floor(bot.y / TILE);
+      let t2x = Math.floor(other.x / TILE), t2y = Math.floor(other.y / TILE);
+      if (this.game.map.hasLineOfSight(t1x, t1y, t2x, t2y)) {
+        enemies.push(other);
+      }
+    }
+    return enemies;
+  }
+
+  doExploring(bot, closest, dist) {
+    // If we spot an enemy, switch to seeking
+    if (closest && dist < bot.weaponRange) {
+      let p = bot.personality;
+      if (p === 'Sniper' && dist < 60) {
+        // Sniper wants more distance
+        bot.state = STATES.SEEKING_COVER;
+        return;
+      }
+      bot.target = closest;
+      bot.state = STATES.ATTACKING;
+      return;
+    }
+    // Pick random walkable destination
+    if (!bot.destination || this.game.distPixels(bot, bot.destination.x * TILE + TILE/2, bot.destination.y * TILE + TILE/2) < TILE * 2) {
+      let candidates = this.game.map.walkableSpawns;
+      if (candidates.length > 0) {
+        bot.destination = candidates[Math.floor(Math.random() * candidates.length)];
+        bot.path = this.game.map.bfs(bot.tileX, bot.tileY, bot.destination.x, bot.destination.y) || [];
+        bot.pathIndex = 0;
+      }
+    }
+    this.moveAlongPath(bot);
+  }
+
+  doSeekingEnemy(bot, closest, dist) {
+    if (closest && dist < bot.weaponRange) {
+      bot.target = closest;
+      bot.state = STATES.ATTACKING;
+      return;
+    }
+    // Move toward last known enemy position
+    if (bot.lastEnemyPos) {
+      let tx = Math.floor(bot.lastEnemyPos.x / TILE);
+      let ty = Math.floor(bot.lastEnemyPos.y / TILE);
+      if (!bot.path || bot.pathIndex >= bot.path.length) {
+        bot.path = this.game.map.bfs(bot.tileX, bot.tileY, tx, ty) || [];
+        bot.pathIndex = 0;
+      }
+      this.moveAlongPath(bot);
+    } else {
+      bot.state = STATES.EXPLORING;
+    }
+    // Switch after some time
+    if (bot && bot.path && bot.pathIndex >= (bot.path ? bot.path.length : 0)) {
+      bot.state = STATES.EXPLORING;
+    }
+  }
+
+  doChasing(bot, closest, dist) {
+    if (!closest || !closest.alive) { bot.state = STATES.EXPLORING; return; }
+    if (dist > bot.weaponRange * 1.5) { bot.state = STATES.EXPLORING; return; }
+
+    let p = bot.personality;
+    let attackRange = p === 'Sniper' ? bot.weaponRange * 0.8 : (p === 'Aggressive' ? bot.weaponRange * 0.5 : bot.weaponRange * 0.6);
+
+    if (dist <= attackRange) {
+      bot.state = STATES.ATTACKING;
+      return;
+    }
+    // Chase toward enemy
+    let tx = Math.floor(closest.x / TILE);
+    let ty = Math.floor(closest.y / TILE);
+    if (!bot.path || bot.pathIndex >= bot.path.length) {
+      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, tx, ty) || [];
+      bot.pathIndex = 0;
+    }
+    this.moveAlongPath(bot);
+  }
+
+  doAttacking(bot, closest, dist) {
+    if (!closest || !closest.alive) {
+      bot.target = null;
+      bot.state = STATES.EXPLORING;
+      return;
+    }
+    if (dist > bot.weaponRange * 1.5) {
+      bot.state = STATES.EXPLORING;
+      return;
+    }
+
+    let t1x = bot.tileX, t1y = bot.tileY;
+    let t2x = closest.tileX, t2y = closest.tileY;
+    let hasLOS = this.game.map.hasLineOfSight(t1x, t1y, t2x, t2y);
+
+    if (!hasLOS) {
+      // Reposition
+      let p = bot.personality;
+      if (p === 'Sniper') {
+        bot.state = STATES.SEEKING_COVER;
+      } else {
+        bot.state = STATES.CHASING;
+      }
+      return;
+    }
+
+    // Check personality-specific range preferences
+    let p = bot.personality;
+    let idealRange = p === 'Sniper' ? 120 : (p === 'Aggressive' ? 40 : 80);
+    if (p === 'Sniper' && dist < 60) {
+      bot.state = STATES.SEEKING_COVER;
+      return;
+    }
+    if (p === 'Aggressive' && dist > 100) {
+      bot.state = STATES.CHASING;
+      return;
+    }
+
+    // Shoot
+    if (bot.cooldown <= 0) {
+      this.shoot(bot, closest);
+      bot.cooldown = bot.cooldownMax;
+    }
+
+    // Face target
+    bot.direction = Math.atan2(closest.y - bot.y, closest.x - bot.x);
+  }
+
+  doSeekingCover(bot) {
+    let cover = this.findBestCover(bot);
+    if (cover) {
+      bot.coverTile = cover;
+      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, cover.x, cover.y) || [];
+      bot.pathIndex = 0;
+      this.moveAlongPath(bot);
+      // Check if reached cover
+      let d = Math.abs(bot.x - (cover.x * TILE + TILE/2)) + Math.abs(bot.y - (cover.y * TILE + TILE/2));
+      if (d < TILE) {
+        bot.state = STATES.IN_COVER;
+        bot.peekTimer = 2 + Math.random() * 3;
+        this.game.log.add(`${bot.name} took cover`, 'cover');
+      }
+    } else {
+      // No cover found, flee instead
+      bot.state = STATES.FLEEING;
+    }
+  }
+
+  doInCover(bot, closest, dist) {
+    bot.peekTimer -= 1 / 60;
+    if (bot.peekTimer <= 0) {
+      // Peek and maybe shoot
+      if (closest && closest.alive && dist < bot.weaponRange) {
+        let t1x = bot.tileX, t1y = bot.tileY;
+        let t2x = closest.tileX, t2y = closest.tileY;
+        if (this.game.map.hasLineOfSight(t1x, t1y, t2x, t2y) && bot.cooldown <= 0) {
+          this.shoot(bot, closest);
+          bot.cooldown = bot.cooldownMax;
+        }
+        bot.state = STATES.ATTACKING;
+        return;
+      }
+      // Wait a bit more
+      bot.peekTimer = 1 + Math.random() * 2;
+    }
+    // If health recovered, maybe explore again
+    if (bot.health > 60 && Math.random() < 0.005) {
+      bot.state = STATES.EXPLORING;
+    }
+  }
+
+  doFleeing(bot) {
+    // Move away from last known enemy
+    let fleeTarget = this.findFleePosition(bot);
+    if (fleeTarget) {
+      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, fleeTarget.x, fleeTarget.y) || [];
+      bot.pathIndex = 0;
+      this.moveAlongPath(bot);
+    }
+    // If health is okay, go back to exploring
+    if (bot.health > 50 && Math.random() < 0.01) {
+      bot.state = STATES.EXPLORING;
+    }
+  }
+
+  findBestCover(bot) {
+    let best = null;
+    let bestScore = -Infinity;
+    let enemyPos = bot.lastEnemyPos || { x: bot.x + 200, y: bot.y };
+
+    for (let cover of this.game.map.coverList) {
+      let cx = cover.x * TILE + TILE / 2;
+      let cy = cover.y * TILE + TILE / 2;
+      let dToBot = Math.sqrt((bot.x - cx) ** 2 + (bot.y - cy) ** 2);
+      let dToEnemy = Math.sqrt((enemyPos.x - cx) ** 2 + (enemyPos.y - cy) ** 2);
+
+      if (dToBot > 300) continue; // Too far
+      if (dToBot < TILE) continue; // Too close
+
+      // Check if cover blocks line of fire from enemy
+      let blocksFire = !this.game.map.hasLineOfSight(cover.x, cover.y, bot.tileX, bot.tileY);
+
+      let score = 0;
+      score += blocksFire ? 50 : 0;
+      score += dToEnemy * 0.1; // Prefer cover far from enemy
+      score -= dToBot * 0.3; // Prefer cover close to bot
+      score -= 10; // Slight penalty for any cover (prefer none if not needed)
+
+      // Personality adjustments
+      if (bot.personality === 'Sniper') score += blocksFire ? 30 : 0;
+      if (bot.personality === 'Coward') score += 20;
+
+      // Check adjacency - need to be able to stand next to cover
+      let adjWalkable = false;
+      for (let [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        if (this.game.map.isWalkable(cover.x + dx, cover.y + dy)) { adjWalkable = true; break; }
+      }
+      if (!adjWalkable) continue;
+
+      if (score > bestScore) { bestScore = score; best = { x: cover.x, y: cover.y }; }
+    }
+    return best;
+  }
+
+  findFleePosition(bot) {
+    let enemyPos = bot.lastEnemyPos || { x: bot.x + 200, y: bot.y };
+    // Find walkable tile far from enemy
+    let best = null;
+    let bestDist = 0;
+    let candidates = this.game.map.walkableSpawns;
+    let max = Math.min(candidates.length, 50);
+    for (let i = 0; i < max; i++) {
+      let c = candidates[Math.floor(Math.random() * candidates.length)];
+      let cx = c.x * TILE + TILE / 2;
+      let cy = c.y * TILE + TILE / 2;
+      let d = Math.sqrt((cx - enemyPos.x) ** 2 + (cy - enemyPos.y) ** 2);
+      let dToBot = Math.sqrt((cx - bot.x) ** 2 + (cy - bot.y) ** 2);
+      if (d > bestDist && dToBot < 400) { bestDist = d; best = c; }
+    }
+    return best;
+  }
+
+  moveAlongPath(bot) {
+    if (!bot.path || bot.path.length === 0) return;
+    if (bot.pathIndex >= bot.path.length) {
+      bot.path = [];
+      return;
+    }
+    let target = bot.path[bot.pathIndex];
+    let tx = target.x * TILE + TILE / 2;
+    let ty = target.y * TILE + TILE / 2;
+    let dx = tx - bot.x;
+    let dy = ty - bot.y;
+    let d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 3) {
+      bot.pathIndex++;
+      return;
+    }
+    let moveX = (dx / d) * bot.speed * (1 / 60);
+    let moveY = (dy / d) * bot.speed * (1 / 60);
+    this.tryMove(bot, moveX, moveY);
+    bot.direction = Math.atan2(dy, dx);
+  }
+
+  tryMove(bot, dx, dy) {
+    let nx = bot.x + dx;
+    let ny = bot.y + dy;
+    // Collision check with margin
+    let margin = bot.radius - 2;
+    let corners = [
+      {x: nx - margin, y: ny - margin},
+      {x: nx + margin, y: ny - margin},
+      {x: nx - margin, y: ny + margin},
+      {x: nx + margin, y: ny + margin}
+    ];
+    let blocked = false;
+    for (let c of corners) {
+      let tx = Math.floor(c.x / TILE);
+      let ty = Math.floor(c.y / TILE);
+      if (this.game.map.isBlocked(tx, ty)) { blocked = true; break; }
+    }
+    if (!blocked) {
+      bot.x = nx;
+      bot.y = ny;
+    } else {
+      // Try sliding
+      let nx2 = bot.x + dx;
+      let corners2 = [
+        {x: nx2 - margin, y: bot.y - margin},
+        {x: nx2 + margin, y: bot.y - margin},
+        {x: nx2 - margin, y: bot.y + margin},
+        {x: nx2 + margin, y: bot.y + margin}
+      ];
+      let blockedX = false;
+      for (let c of corners2) {
+        let tx = Math.floor(c.x / TILE);
+        let ty = Math.floor(c.y / TILE);
+        if (this.game.map.isBlocked(tx, ty)) { blockedX = true; break; }
+      }
+      if (!blockedX) { bot.x = nx2; return; }
+
+      let ny2 = bot.y + dy;
+      let corners3 = [
+        {x: bot.x - margin, y: ny2 - margin},
+        {x: bot.x + margin, y: ny2 - margin},
+        {x: bot.x - margin, y: ny2 + margin},
+        {x: bot.x + margin, y: ny2 + margin}
+      ];
+      let blockedY = false;
+      for (let c of corners3) {
+        let tx = Math.floor(c.x / TILE);
+        let ty = Math.floor(c.y / TILE);
+        if (this.game.map.isBlocked(tx, ty)) { blockedY = true; break; }
+      }
+      if (!blockedY) { bot.y = ny2; }
+    }
+  }
+
+  shoot(bot, target) {
+    // Add inaccuracy
+    let inaccuracy = (1 - bot.shotAccuracy) * 30;
+    let tx = target.x + (Math.random() - 0.5) * inaccuracy;
+    let ty = target.y + (Math.random() - 0.5) * inaccuracy;
+    let bullet = new Bullet(bot.x, bot.y, tx, ty, bot);
+    this.game.bullets.push(bullet);
+    bot.direction = Math.atan2(ty - bot.y, tx - bot.x);
+    this.resolveBullet(bullet);
+  }
+
+  resolveBullet(bullet) {
+    let t1x = Math.floor(bullet.x / TILE), t1y = Math.floor(bullet.y / TILE);
+    let t2x = Math.floor(bullet.tx / TILE), t2y = Math.floor(bullet.ty / TILE);
+
+    // Check if line passes through wall/cover before reaching target
+    let dx = Math.abs(t2x - t1x), dy = Math.abs(t2y - t1y);
+    let sx = t1x < t2x ? 1 : -1, sy = t1y < t2y ? 1 : -1;
+    let err = dx - dy;
+    let cx = t1x, cy = t1y;
+
+    while (true) {
+      if (cx === t2x && cy === t2y) break;
+      if (cx < 0 || cx >= MAP_W || cy < 0 || cy >= MAP_H) { bullet.alive = false; return; }
+      let tile = this.game.map.grid[cy][cx];
+      if (tile === TILE_WALL || tile === TILE_COVER) {
+        // Bullet blocked
+        bullet.tx = cx * TILE + TILE / 2;
+        bullet.ty = cy * TILE + TILE / 2;
+        bullet.alive = false;
+        return;
+      }
+      let e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; cx += sx; }
+      if (e2 < dx) { err += dx; cy += sy; }
+    }
+
+    // Check if bullet hits target bot
+    let hitBot = null;
+    let hitDist = Infinity;
+    for (let other of this.game.bots) {
+      if (other === bullet.shooter || !other.alive) continue;
+      let d = Math.sqrt((other.x - bullet.tx) ** 2 + (other.y - bullet.ty) ** 2);
+      if (d < other.radius + 5 && d < hitDist) {
+        hitDist = d;
+        hitBot = other;
+      }
+    }
+
+    if (hitBot) {
+      bullet.hit = true;
+      bullet.hitTarget = hitBot;
+      let damage = 12 + Math.random() * 10;
+      hitBot.health -= damage;
+      hitBot.attacker = bullet.shooter;
+      hitBot.lastEnemyPos = { x: bullet.shooter.x, y: bullet.shooter.y };
+      hitBot.target = bullet.shooter;
+      this.game.log.add(`${bullet.shooter.name} hit ${hitBot.name} for ${damage.toFixed(0)} dmg`, 'hit');
+
+      if (hitBot.health <= 0) {
+        hitBot.health = 0;
+        hitBot.alive = false;
+        hitBot.state = STATES.DEAD;
+        hitBot.deathKiller = bullet.shooter.name;
+        bullet.shooter.kills++;
+        this.game.log.add(`${bullet.shooter.name} killed ${hitBot.name}!`, 'kill');
+      }
+
+      // Target reacts
+      if (hitBot.alive && hitBot.state !== STATES.Dead) {
+        if (hitBot.health < 30 || hitBot.personality === 'Coward') {
+          hitBot.state = STATES.SEEKING_COVER;
+          this.game.log.add(`${hitBot.name} seeks cover`, 'cover');
+        } else {
+          hitBot.state = STATES.ATTACKING;
+        }
+      }
+    }
+  }
+
+  recoverFromStuck(bot) {
+    bot.stuckTimer = 0;
+    // Random walk to nearby walkable tile
+    let dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    let best = null;
+    for (let [dx, dy] of dirs) {
+      let nx = bot.tileX + dx * 2;
+      let ny = bot.tileY + dy * 2;
+      if (this.game.map.isWalkable(nx, ny)) {
+        best = {x: nx, y: ny};
+        break;
+      }
+    }
+    if (best) {
+      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, best.x, best.y) || [];
+      bot.pathIndex = 0;
+    } else {
+      bot.path = [];
+    }
+  }
+}
+
+// ======================== RENDERER ========================
+class Renderer {
+  constructor(canvas, game) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.game = game;
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+  }
+  render() {
+    let ctx = this.ctx;
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    // Draw map
+    this.drawMap();
+    // Draw bullets
+    this.drawBullets();
+    // Draw bots
+    this.drawBots();
+    // Draw debug
+    if (this.game.debug) this.drawDebug();
+  }
+  drawMap() {
+    let ctx = this.ctx;
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        let tile = this.game.map.grid[y][x];
+        let px = x * TILE, py = y * TILE;
+        if (tile === TILE_WALL) {
+          ctx.fillStyle = '#2c3e50';
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.strokeStyle = '#1a252f';
+          ctx.strokeRect(px, py, TILE, TILE);
+        } else if (tile === TILE_COVER) {
+          ctx.fillStyle = '#4a6741';
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.strokeStyle = '#3a5731';
+          ctx.strokeRect(px, py, TILE, TILE);
+          // Cover detail
+          ctx.fillStyle = '#5a7751';
+          ctx.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
+        } else {
+          ctx.fillStyle = '#1a1a2e';
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+      }
+    }
+  }
+  drawBots() {
+    let ctx = this.ctx;
+    for (let bot of this.game.bots) {
+      let x = bot.x, y = bot.y;
+      if (!bot.alive) {
+        // Dead bot
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#555';
+        ctx.beginPath();
+        ctx.arc(x, y, bot.radius, 0, Math.PI * 2);
+        ctx.fill();
+        // X mark
+        ctx.strokeStyle = '#e94560';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6);
+        ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        continue;
+      }
+      // Body
+      ctx.fillStyle = bot.color;
+      ctx.beginPath();
+      ctx.arc(x, y, bot.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Direction indicator
+      ctx.strokeStyle = bot.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(bot.direction) * 14, y + Math.sin(bot.direction) * 14);
+      ctx.stroke();
+      // Health bar
+      let barW = 24, barH = 3;
+      let barX = x - barW / 2, barY = y - bot.radius - 8;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(barX, barY, barW, barH);
+      let hp = bot.health / bot.maxHealth;
+      ctx.fillStyle = hp > 0.5 ? '#2ed573' : (hp > 0.25 ? '#ffa502' : '#ff4757');
+      ctx.fillRect(barX, barY, barW * hp, barH);
+      // Name
+      ctx.fillStyle = '#fff';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(bot.name, x, y + bot.radius + 10);
+    }
+  }
+  drawBullets() {
+    let ctx = this.ctx;
+    for (let b of this.game.bullets) {
+      if (!b.alive) continue;
+      ctx.strokeStyle = '#ffdd59';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#ffdd59';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.tx, b.ty);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // Hit marker
+      if (b.hit) {
+        ctx.fillStyle = '#ff4757';
+        ctx.beginPath();
+        ctx.arc(b.tx, b.ty, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  drawDebug() {
+    let ctx = this.ctx;
+    for (let bot of this.game.bots) {
+      if (!bot.alive) continue;
+      // Vision radius
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(bot.x, bot.y, bot.visionRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      // State label
+      ctx.fillStyle = '#0f0';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(STATE_NAMES[bot.state], bot.x + 14, bot.y - 6);
+      // Path
+      if (bot.path && bot.path.length > 0) {
+        ctx.strokeStyle = 'rgba(0,255,0,0.2)';
+        ctx.beginPath();
+        for (let i = bot.pathIndex; i < bot.path.length; i++) {
+          let p = bot.path[i];
+          let px = p.x * TILE + TILE / 2;
+          let py = p.y * TILE + TILE / 2;
+          if (i === bot.pathIndex) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      // Target line
+      if (bot.target && bot.target.alive) {
+        ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(bot.x, bot.y);
+        ctx.lineTo(bot.target.x, bot.target.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // Cover tile
+      if (bot.coverTile) {
+        ctx.strokeStyle = 'rgba(0,150,255,0.5)';
+        ctx.strokeRect(bot.coverTile.x * TILE, bot.coverTile.y * TILE, TILE, TILE);
+      }
+    }
+  }
+}
+
+// ======================== GAME ========================
+class Game {
+  constructor() {
+    this.canvas = document.getElementById('game-canvas');
+    this.renderer = new Renderer(this.canvas, this);
+    this.ai = new AIController(this);
+    this.log = new EventLog();
+    this.bots = [];
+    this.bullets = [];
+    this.map = null;
+    this.running = false;
+    this.paused = false;
+    this.debug = false;
+    this.speed = 3;
+    this.matchTime = 0;
+    this.seed = Math.floor(Math.random() * 99999);
+    this.winner = null;
+    this.lastTime = 0;
+    this.bulletTimer = 0;
+  }
+
+  start() {
+    this.seed = Math.floor(Math.random() * 99999);
+    document.getElementById('seed-display').textContent = this.seed;
+    this.map = new GameMap(this.seed);
+    this.bots = [];
+    this.bullets = [];
+    this.log.clear();
+    this.matchTime = 0;
+    this.winner = null;
+    this.running = true;
+    this.paused = false;
+    document.getElementById('btn-pause').textContent = 'Pause';
+
+    // Spawn bots
+    this.spawnBots();
+    this.updateUI();
+    this.log.add(`Match started with seed ${this.seed}`);
+    this.lastTime = performance.now();
+    requestAnimationFrame((t) => this.loop(t));
+  }
+
+  spawnBots() {
+    let spawned = [];
+    let minDist = TILE * 4;
+    let attempts = 0;
+    let maxAttempts = 5000;
+
+    for (let i = 0; i < 10 && attempts < maxAttempts; i++) {
+      let placed = false;
+      let localAttempts = 0;
+      while (!placed && localAttempts < 500) {
+        localAttempts++;
+        attempts++;
+        let sp = this.map.walkableSpawns[Math.floor(Math.random() * this.map.walkableSpawns.length)];
+        if (!sp) break;
+        let px = sp.x * TILE + TILE / 2;
+        let py = sp.y * TILE + TILE / 2;
+        // Check min distance
+        let tooClose = false;
+        for (let s of spawned) {
+          let d = Math.sqrt((px - s.x) ** 2 + (py - s.y) ** 2);
+          if (d < minDist) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        let personality = PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)];
+        let bot = new Bot(i, px, py, personality, BOT_COLORS[i]);
+        this.bots.push(bot);
+        spawned.push({x: px, y: py});
+        placed = true;
+        this.log.add(`${bot.name} spawned as ${personality}`);
+      }
+      if (!placed) {
+        this.log.add(`Warning: Could not spawn bot ${i} in valid position`);
+      }
+    }
+    if (this.bots.length < 10) {
+      this.log.add(`Only ${this.bots.length}/10 bots spawned`);
+    }
+  }
+
+  loop(timestamp) {
+    if (!this.running) return;
+    let dt = (timestamp - this.lastTime) / 1000;
+    this.lastTime = timestamp;
+    if (dt > 0.1) dt = 0.1;
+
+    if (!this.paused) {
+      // Run simulation at speed multiplier
+      let steps = this.speed;
+      let subDt = dt / steps;
+      for (let s = 0; s < steps; s++) {
+        this.update(subDt);
+      }
+      this.matchTime += dt * this.speed;
+    }
+
+    this.renderer.render();
+    this.updateUI();
+
+    // Check match end
+    let alive = this.bots.filter(b => b.alive);
+    if (alive.length <= 1 && this.bots.length >= 10) {
+      this.endMatch(alive[0] || null);
+      return;
+    }
+
+    // Clean old bullets
+    this.bulletTimer += dt;
+    if (this.bulletTimer > 0.15) {
+      this.bullets = this.bullets.filter(b => b.alive);
+      this.bulletTimer = 0;
+    }
+
+    requestAnimationFrame((t) => this.loop(t));
+  }
+
+  update(dt) {
+    for (let bot of this.bots) {
+      this.ai.update(bot, dt);
+    }
+  }
+
+  dist(a, b) {
+    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+  }
+
+  distPixels(bot, px, py) {
+    return Math.sqrt((bot.x - px) ** 2 + (bot.y - py) ** 2);
+  }
+
+  endMatch(winner) {
+    this.running = false;
+    this.winner = winner;
+    if (winner) {
+      this.log.add(`${winner.name} WINS the match!`, 'win');
+    }
+    this.showRanking();
+    this.updateUI();
+  }
+
+  showRanking() {
+    let sorted = [...this.bots].sort((a, b) => {
+      if (a.alive && !b.alive) return -1;
+      if (!a.alive && b.alive) return 1;
+      if (b.kills !== a.kills) return b.kills - a.kills;
+      if (b.survivalTime !== a.survivalTime) return b.survivalTime - a.survivalTime;
+      return b.health - a.health;
+    });
+
+    let maxKills = Math.max(...sorted.map(b => b.kills));
+
+    let html = '<tr><th>#</th><th>Name</th><th>Personality</th><th>Status</th><th>Kills</th><th>Survived</th><th>HP</th><th>Killed By</th></tr>';
+    sorted.forEach((bot, i) => {
+      let killsClass = bot.kills === maxKills && maxKills > 0 ? ' class="most-kills"' : '';
+      html += `<tr>
+        <td>${i + 1}</td>
+        <td style="color:${bot.color}">${bot.name}</td>
+        <td>${bot.personality}</td>
+        <td>${bot.alive ? 'ALIVE' : 'DEAD'}</td>
+        <td${killsClass}>${bot.kills}</td>
+        <td>${bot.survivalTime.toFixed(1)}s</td>
+        <td>${Math.max(0, bot.health).toFixed(0)}</td>
+        <td>${bot.deathKiller || '-'}</td>
+      </tr>`;
+    });
+    document.getElementById('ranking-table').innerHTML = html;
+    document.getElementById('winner-display').textContent = this.winner ? `Winner: ${this.winner.name}` : 'No Winner';
+    document.getElementById('ranking-overlay').classList.add('show');
+  }
+
+  updateUI() {
+    let alive = this.bots.filter(b => b.alive).length;
+    document.getElementById('alive-count').textContent = alive;
+    let mins = Math.floor(this.matchTime / 60);
+    let secs = Math.floor(this.matchTime % 60);
+    document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    // Bot list
+    let html = '';
+    for (let bot of this.bots) {
+      let deadClass = bot.alive ? '' : 'dead';
+      let hpColor = bot.health > 50 ? '#2ed573' : (bot.health > 25 ? '#ffa502' : '#ff4757');
+      html += `<div class="bot-card ${deadClass}" style="border-left-color:${bot.color}">
+        <span class="bot-name" style="color:${bot.color}">${bot.name}</span>
+        <span class="bot-info"><span>${bot.personality}</span><span>${STATE_NAMES[bot.state]}</span></span>
+        <div class="health-bar"><div class="health-fill" style="width:${bot.health}%;background:${hpColor}"></div></div>
+        <div class="bot-info"><span>Kills: ${bot.kills}</span><span>HP: ${Math.max(0,bot.health).toFixed(0)}</span><span>${bot.alive ? 'ALIVE' : 'DEAD'}</span></div>
+        ${bot.target && bot.target.alive ? `<div class="bot-info" style="color:#ff6b6b">Target: ${bot.target.name}</div>` : ''}
+      </div>`;
+    }
+    document.getElementById('bot-list').innerHTML = html;
+
+    // Log
+    let logHtml = '';
+    let recentEntries = this.log.entries.slice(-80);
+    for (let e of recentEntries) {
+      logHtml += `<div class="log-entry ${e.type}">${e.text}</div>`;
+    }
+    document.getElementById('log-list').innerHTML = logHtml;
+    let logPanel = document.getElementById('log-panel');
+    logPanel.scrollTop = logPanel.scrollHeight;
+  }
+
+  pause() {
+    if (!this.running) return;
+    this.paused = !this.paused;
+    document.getElementById('btn-pause').textContent = this.paused ? 'Resume' : 'Pause';
+    if (!this.paused) {
+      this.lastTime = performance.now();
+      requestAnimationFrame((t) => this.loop(t));
+    }
+  }
+
+  restart() {
+    this.running = false;
+    document.getElementById('ranking-overlay').classList.remove('show');
+    this.start();
+  }
+}
+
+// ======================== INIT ========================
+let game = new Game();
+
+document.getElementById('btn-start').addEventListener('click', () => game.start());
+document.getElementById('btn-pause').addEventListener('click', () => game.pause());
+document.getElementById('btn-restart').addEventListener('click', () => game.restart());
+document.getElementById('speed-slider').addEventListener('input', (e) => {
+  game.speed = parseInt(e.target.value);
+  document.getElementById('speed-val').textContent = game.speed + 'x';
+});
+document.getElementById('debug-check').addEventListener('change', (e) => {
+  game.debug = e.target.checked;
+});
+document.getElementById('btn-close-ranking').addEventListener('click', () => {
+  document.getElementById('ranking-overlay').classList.remove('show');
+});
+
+// Scale canvas to fit
+function resizeCanvas() {
+  let wrap = document.getElementById('canvas-wrap');
+  let maxW = wrap.clientWidth - 16;
+  let maxH = wrap.clientHeight - 16;
+  let scale = Math.min(maxW / CANVAS_W, maxH / CANVAS_H, 1);
+  game.canvas.style.width = (CANVAS_W * scale) + 'px';
+  game.canvas.style.height = (CANVAS_H * scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+</script>
+</body>
+</html>
