@@ -72,7 +72,7 @@ class GameMap {
   }
   isWalkable(x, y) {
     if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
-    return this.grid[y][x] !== TILE_WALL;
+    return this.grid[y][x] === TILE_FLOOR;
   }
   isWall(x, y) {
     if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
@@ -102,43 +102,94 @@ class GameMap {
       if (e2 < dx) { err += dx; cy += sy; }
     }
   }
-  bfs(sx, sy, tx, ty) {
+  aStar(sx, sy, tx, ty) {
     if (sx === tx && sy === ty) return [{x: sx, y: sy}];
     if (!this.isWalkable(tx, ty)) return null;
-    let visited = new Uint8Array(MAP_W * MAP_H);
-    let parent = new Int32Array(MAP_W * MAP_H * 2);
+    if (!this.isWalkable(sx, sy)) return null;
+
     let idx = (x, y) => y * MAP_W + x;
-    let q = [sx + ',' + sy];
-    visited[idx(sx, sy)] = 1;
-    let dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
-    while (q.length > 0) {
-      let [cx, cy] = q.shift().split(',').map(Number);
-      for (let [dx, dy] of dirs) {
-        let nx = cx + dx, ny = cy + dy;
-        let ni = idx(nx, ny);
-        if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) continue;
-        if (visited[ni]) continue;
-        if (!this.isWalkable(nx, ny)) continue;
-        if (dx !== 0 && dy !== 0) {
-          if (!this.isWalkable(cx + dx, cy) || !this.isWalkable(cx, cy + dy)) continue;
-        }
-        visited[ni] = 1;
-        parent[ni * 2] = cx;
-        parent[ni * 2 + 1] = cy;
-        if (nx === tx && ny === ty) {
-          let path = [{x: nx, y: ny}];
-          let px = nx, py = ny;
-          while (px !== sx || py !== sy) {
-            let pi = idx(px, py);
-            let ppx = parent[pi * 2], ppy = parent[pi * 2 + 1];
-            path.unshift({x: ppx, y: ppy});
-            px = ppx; py = ppy;
-          }
-          return path;
-        }
-        q.push(nx + ',' + ny);
+    let size = MAP_W * MAP_H;
+    let gScore = new Float32Array(size).fill(Infinity);
+    let fScore = new Float32Array(size).fill(Infinity);
+    let visited = new Uint8Array(size);
+    let parent = new Int32Array(size * 2);
+
+    gScore[idx(sx, sy)] = 0;
+    fScore[idx(sx, sy)] = Math.abs(tx - sx) + Math.abs(ty - sy); // Manhattan heuristic
+
+    // Binary min-heap: array of [f, x, y], 1-based indexing
+    let heap = [undefined, [fScore[idx(sx, sy)], sx, sy]];
+    let heapIdx = 1;
+
+    function heapPush(f, x, y) {
+      let i = ++heapIdx;
+      heap[i] = [f, x, y];
+      while (i > 1) {
+        let p = i >> 1;
+        if (heap[p][0] <= heap[i][0]) break;
+        let tmp = heap[p]; heap[p] = heap[i]; heap[i] = tmp;
+        i = p;
       }
     }
+
+    function heapPop() {
+      let top = heap[1];
+      heap[1] = heap[heapIdx--];
+      heap[heapIdx + 1] = undefined;
+      let i = 1;
+      while (true) {
+        let smallest = i, l = i * 2, r = l + 1;
+        if (l <= heapIdx && heap[l][0] < heap[smallest][0]) smallest = l;
+        if (r <= heapIdx && heap[r][0] < heap[smallest][0]) smallest = r;
+        if (smallest === i) break;
+        let tmp = heap[smallest]; heap[smallest] = heap[i]; heap[i] = tmp;
+        i = smallest;
+      }
+      return top;
+    }
+
+    let dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+
+    while (heapIdx > 0) {
+      let [, cx, cy] = heapPop();
+      let ci = idx(cx, cy);
+
+      if (cx === tx && cy === ty) {
+        let path = [{x: cx, y: cy}];
+        let px = cx, py = cy;
+        while (px !== sx || py !== sy) {
+          let pi = idx(px, py);
+          let ppx = parent[pi * 2], ppy = parent[pi * 2 + 1];
+          path.unshift({x: ppx, y: ppy});
+          px = ppx; py = ppy;
+        }
+        return path;
+      }
+
+      if (visited[ci]) continue;
+      visited[ci] = 1;
+
+      for (let [dx, dy] of dirs) {
+        let nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) continue;
+        if (!this.isWalkable(nx, ny)) continue;
+
+        let ni = idx(nx, ny);
+        if (visited[ni]) continue;
+
+        let tentativeG = gScore[ci] + 1;
+
+        if (tentativeG < gScore[ni]) {
+          gScore[ni] = tentativeG;
+          let h = Math.abs(tx - nx) + Math.abs(ty - ny);
+          fScore[ni] = tentativeG + h;
+          parent[ni * 2] = cx;
+          parent[ni * 2 + 1] = cy;
+          heapPush(fScore[ni], nx, ny);
+        }
+      }
+    }
+
     return null;
   }
 }

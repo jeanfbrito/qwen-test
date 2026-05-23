@@ -115,17 +115,40 @@ class Renderer {
     let ctx = this.ctx;
     for (let bot of this.game.bots) {
       if (!bot.alive) continue;
-      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(bot.x, bot.y, bot.visionRadius, 0, Math.PI * 2);
       ctx.stroke();
+      // Hearing radius (cyan dashed)
+      ctx.strokeStyle = 'rgba(0,200,255,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.arc(bot.x, bot.y, bot.hearingRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Noise level indicator
+      if (bot.noiseLevel > 0) {
+        let noiseAlpha = Math.min(1, bot.noiseLevel / 150);
+        ctx.strokeStyle = `rgba(255,165,0,${noiseAlpha * 0.9})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(bot.x, bot.y, bot.radius + 4 + noiseAlpha * 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
       ctx.fillStyle = '#0f0';
-      ctx.font = '8px monospace';
+      ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'left';
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(STATE_NAMES[bot.state], bot.x + 14, bot.y - 6);
       ctx.fillText(STATE_NAMES[bot.state], bot.x + 14, bot.y - 6);
+      ctx.lineWidth = 1;
       if (bot.path && bot.path.length > 0) {
-        ctx.strokeStyle = 'rgba(0,255,0,0.2)';
+        ctx.strokeStyle = 'rgba(0,255,100,0.7)';
+        ctx.lineWidth = 2;
         ctx.beginPath();
         for (let i = bot.pathIndex; i < bot.path.length; i++) {
           let p = bot.path[i];
@@ -137,7 +160,8 @@ class Renderer {
         ctx.stroke();
       }
       if (bot.target && bot.target.alive) {
-        ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+        ctx.strokeStyle = 'rgba(255,50,50,0.7)';
+        ctx.lineWidth = 2;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
         ctx.moveTo(bot.x, bot.y);
@@ -146,7 +170,8 @@ class Renderer {
         ctx.setLineDash([]);
       }
       if (bot.coverTile) {
-        ctx.strokeStyle = 'rgba(0,150,255,0.5)';
+        ctx.strokeStyle = 'rgba(100,180,255,0.9)';
+        ctx.lineWidth = 2;
         ctx.strokeRect(bot.coverTile.x * TILE, bot.coverTile.y * TILE, TILE, TILE);
       }
     }

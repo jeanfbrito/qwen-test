@@ -9,6 +9,10 @@ class AIController {
     if (bot.cooldown > 0) bot.cooldown -= dt;
     bot.survivalTime += dt;
 
+    // Decay noise level
+    bot.noiseLevel = Math.max(0, bot.noiseLevel - 80 * dt);
+
+    // Detect visible enemies
     let visibleEnemies = this.detectEnemies(bot);
     let closestVisible = null;
     let closestDist = Infinity;
@@ -17,13 +21,34 @@ class AIController {
       if (d < closestDist) { closestDist = d; closestVisible = e; }
     }
 
+    // Detect noisy enemies (hearing)
+    let heardEnemy = this.detectNoisyEnemies(bot);
+
     if (closestVisible) {
       bot.lastEnemyPos = { x: closestVisible.x, y: closestVisible.y };
     }
 
+    // Hearing updates target info even without line of sight
+    if (heardEnemy && !closestVisible) {
+      bot.heardEnemy = heardEnemy.enemy;
+      bot.heardEnemyPos = { x: heardEnemy.enemy.x, y: heardEnemy.enemy.y };
+      if (!bot.lastEnemyPos) {
+        bot.lastEnemyPos = { x: heardEnemy.enemy.x, y: heardEnemy.enemy.y };
+      }
+    }
+
+    // Hearing reaction: loud noises (shots) grab attention in any state
+    if (heardEnemy && !closestVisible && heardEnemy.noise > 100) {
+      if (bot.state !== STATES.ATTACKING && bot.state !== STATES.SEEKING_COVER && bot.state !== STATES.FLEEING) {
+        bot.target = heardEnemy.enemy;
+        bot.lastEnemyPos = { x: heardEnemy.enemy.x, y: heardEnemy.enemy.y };
+        bot.state = STATES.SEEKING_ENEMY;
+      }
+    }
+
     switch (bot.state) {
       case STATES.EXPLORING:
-        this.doExploring(bot, closestVisible, closestDist);
+        this.doExploring(bot, closestVisible, closestDist, heardEnemy);
         break;
       case STATES.SEEKING_ENEMY:
         this.doSeekingEnemy(bot, closestVisible, closestDist);
@@ -45,6 +70,30 @@ class AIController {
         break;
     }
 
+    // Interrupt: react to being shot — decide to fight back or run for cover
+    if (bot.alive && bot.lastDamageTime > 0 && this.game.time - bot.lastDamageTime < 0.5) {
+      bot.lastDamageTime = 0;
+      if (bot.state !== STATES.ATTACKING && bot.state !== STATES.SEEKING_COVER && bot.state !== STATES.FLEEING) {
+        if (bot.health < 30 || bot.personality === 'Coward') {
+          bot.state = STATES.SEEKING_COVER;
+        } else if (bot.personality === 'Sniper') {
+          bot.state = Math.random() < 0.5 ? STATES.SEEKING_COVER : STATES.ATTACKING;
+        } else {
+          let shooter = bot.target;
+          if (shooter && shooter.alive) {
+            let dist = this.game.dist(bot, shooter);
+            if (dist < bot.weaponRange * 0.8) {
+              bot.state = STATES.ATTACKING;
+            } else {
+              bot.state = Math.random() < 0.5 ? STATES.SEEKING_COVER : STATES.ATTACKING;
+            }
+          } else {
+            bot.state = STATES.ATTACKING;
+          }
+        }
+      }
+    }
+
     if (bot.alive && bot.health <= 15 && bot.state !== STATES.FLEEING && bot.state !== STATES.Dead && bot.state !== STATES.SEEKING_COVER) {
       bot.state = STATES.FLEEING;
       this.game.log.add(`${bot.name} is fleeing (critical health)`, 'cover');
@@ -56,7 +105,7 @@ class AIController {
     let moved = Math.abs(bot.x - bot.lastMoveX) + Math.abs(bot.y - bot.lastMoveY);
     if (moved < 0.5) {
       bot.stuckTimer += dt;
-      if (bot.stuckTimer > 3) {
+      if (bot.stuckTimer > 1.5) {
         this.recoverFromStuck(bot);
       }
     } else {
@@ -81,7 +130,24 @@ class AIController {
     return enemies;
   }
 
-  doExploring(bot, closest, dist) {
+  detectNoisyEnemies(bot) {
+    let best = null;
+    let bestNoise = 0;
+    for (let other of this.game.bots) {
+      if (other === bot || !other.alive) continue;
+      if (other.noiseLevel <= 0) continue;
+      let d = this.game.dist(bot, other);
+      // Noise falls off with distance
+      let effectiveNoise = other.noiseLevel * (1 - d / bot.hearingRadius);
+      if (effectiveNoise > bestNoise && d < bot.hearingRadius) {
+        bestNoise = effectiveNoise;
+        best = { enemy: other, distance: d, noise: effectiveNoise };
+      }
+    }
+    return best;
+  }
+
+  doExploring(bot, closest, dist, heard) {
     if (closest && dist < bot.weaponRange) {
       let p = bot.personality;
       if (p === 'Sniper' && dist < 60) {
@@ -92,15 +158,25 @@ class AIController {
       bot.state = STATES.ATTACKING;
       return;
     }
-    if (!bot.destination || this.game.distPixels(bot, bot.destination.x * TILE + TILE/2, bot.destination.y * TILE + TILE/2) < TILE * 2) {
+    // React to heard noise - investigate the source
+    if (heard && !closest) {
+      bot.target = heard.enemy;
+      bot.lastEnemyPos = { x: heard.enemy.x, y: heard.enemy.y };
+      bot.state = STATES.SEEKING_ENEMY;
+      return;
+    }
+    // Pick new destination only when current path is exhausted
+    if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
       let candidates = this.game.map.walkableSpawns;
       if (candidates.length > 0) {
         bot.destination = candidates[Math.floor(Math.random() * candidates.length)];
-        bot.path = this.game.map.bfs(bot.tileX, bot.tileY, bot.destination.x, bot.destination.y) || [];
+        bot.path = this.game.map.aStar(bot.tileX, bot.tileY, bot.destination.x, bot.destination.y) || [];
         bot.pathIndex = 0;
       }
     }
-    this.moveAlongPath(bot);
+    if (bot.path && bot.path.length > 0 && bot.pathIndex < bot.path.length) {
+      this.moveAlongPath(bot);
+    }
   }
 
   doSeekingEnemy(bot, closest, dist) {
@@ -112,15 +188,25 @@ class AIController {
     if (bot.lastEnemyPos) {
       let tx = Math.floor(bot.lastEnemyPos.x / TILE);
       let ty = Math.floor(bot.lastEnemyPos.y / TILE);
-      if (!bot.path || bot.pathIndex >= bot.path.length) {
-        bot.path = this.game.map.bfs(bot.tileX, bot.tileY, tx, ty) || [];
+      // If bot is already at the last known enemy position, give up and explore
+      if (bot.tileX === tx && bot.tileY === ty) {
+        bot.lastEnemyPos = null;
+        bot.state = STATES.EXPLORING;
+        return;
+      }
+      // Only recompute path when needed
+      if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
+        bot.path = this.game.map.aStar(bot.tileX, bot.tileY, tx, ty) || [];
         bot.pathIndex = 0;
       }
-      this.moveAlongPath(bot);
+      if (bot.path && bot.path.length > 0) {
+        this.moveAlongPath(bot);
+      }
     } else {
       bot.state = STATES.EXPLORING;
     }
-    if (bot && bot.path && bot.pathIndex >= (bot.path ? bot.path.length : 0)) {
+    // Fall back to exploring if path was never found
+    if (!bot.path || bot.path.length === 0) {
       bot.state = STATES.EXPLORING;
     }
   }
@@ -138,11 +224,18 @@ class AIController {
     }
     let tx = Math.floor(closest.x / TILE);
     let ty = Math.floor(closest.y / TILE);
-    if (!bot.path || bot.pathIndex >= bot.path.length) {
-      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, tx, ty) || [];
+    // Don't chase into the same tile — switch to attacking instead
+    if (bot.tileX === tx && bot.tileY === ty) {
+      bot.state = STATES.ATTACKING;
+      return;
+    }
+    if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
+      bot.path = this.game.map.aStar(bot.tileX, bot.tileY, tx, ty) || [];
       bot.pathIndex = 0;
     }
-    this.moveAlongPath(bot);
+    if (bot.path && bot.path.length > 0) {
+      this.moveAlongPath(bot);
+    }
   }
 
   doAttacking(bot, closest, dist) {
@@ -164,10 +257,28 @@ class AIController {
       let p = bot.personality;
       if (p === 'Sniper') {
         bot.state = STATES.SEEKING_COVER;
-      } else {
-        bot.state = STATES.CHASING;
+        return;
       }
-      return;
+      // Try to flank: find a walkable tile near the enemy that has LOS
+      if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
+        let flankPos = this.findFlankPosition(bot, closest);
+        if (flankPos) {
+          bot.path = this.game.map.aStar(bot.tileX, bot.tileY, flankPos.x, flankPos.y) || [];
+          bot.pathIndex = 0;
+        } else {
+          // Can't flank — fallback to chasing
+          bot.state = STATES.CHASING;
+          return;
+        }
+      }
+      if (bot.path && bot.path.length > 0) {
+        this.moveAlongPath(bot);
+        return;
+      } else {
+        // No flank path available — fallback
+        bot.state = STATES.CHASING;
+        return;
+      }
     }
 
     let p = bot.personality;
@@ -189,24 +300,74 @@ class AIController {
   }
 
   doSeekingCover(bot) {
-    let cover = this.findBestCover(bot);
-    if (cover) {
-      bot.coverTile = cover;
-      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, cover.x, cover.y) || [];
-      bot.pathIndex = 0;
+    // Only compute new path when needed
+    if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
+      let cover = this.findBestCover(bot);
+      if (cover) {
+        bot.coverTile = cover;
+        let adjDirs = [[-1,0],[1,0],[0,-1],[0,1]];
+        let bestAdj = null;
+        let bestAdjDist = Infinity;
+        for (let [dx, dy] of adjDirs) {
+          let ax = cover.x + dx;
+          let ay = cover.y + dy;
+          if (this.game.map.grid[ay] && this.game.map.grid[ay][ax] === 0) {
+            let ad = Math.abs(bot.x - (ax * TILE + TILE/2)) + Math.abs(bot.y - (ay * TILE + TILE/2));
+            if (ad < bestAdjDist) { bestAdjDist = ad; bestAdj = { x: ax, y: ay }; }
+          }
+        }
+        let targetTile = bestAdj;
+        if (targetTile) {
+          bot.path = this.game.map.aStar(bot.tileX, bot.tileY, targetTile.x, targetTile.y) || [];
+          bot.pathIndex = 0;
+          if (bot.path.length === 0) {
+            bot.state = STATES.FLEEING;
+            return;
+          }
+        } else {
+          bot.state = STATES.FLEEING;
+          return;
+        }
+      } else {
+        bot.state = STATES.FLEEING;
+        return;
+      }
+    }
+    if (bot.path && bot.path.length > 0 && bot.pathIndex < bot.path.length) {
       this.moveAlongPath(bot);
-      let d = Math.abs(bot.x - (cover.x * TILE + TILE/2)) + Math.abs(bot.y - (cover.y * TILE + TILE/2));
-      if (d < TILE) {
+    }
+    // Check if reached cover
+    if (bot.coverTile) {
+      let d = Math.abs(bot.x - (bot.coverTile.x * TILE + TILE/2)) + Math.abs(bot.y - (bot.coverTile.y * TILE + TILE/2));
+      if (d < TILE * 1.5) {
         bot.state = STATES.IN_COVER;
         bot.peekTimer = 2 + Math.random() * 3;
         this.game.log.add(`${bot.name} took cover`, 'cover');
       }
-    } else {
-      bot.state = STATES.FLEEING;
     }
   }
 
   doInCover(bot, closest, dist) {
+    // If enemy is visible and close, attack immediately regardless of peek timer
+    if (closest && closest.alive && dist < bot.weaponRange) {
+      bot.target = closest;
+      bot.state = STATES.ATTACKING;
+      return;
+    }
+    // If hearing an enemy nearby, stop hiding and go investigate
+    if (bot.heardEnemy && bot.heardEnemy.alive) {
+      let hearDist = this.game.dist(bot, bot.heardEnemy);
+      if (hearDist < bot.hearingRadius) {
+        bot.target = bot.heardEnemy;
+        bot.lastEnemyPos = { x: bot.heardEnemy.x, y: bot.heardEnemy.y };
+        bot.state = STATES.SEEKING_ENEMY;
+        return;
+      }
+    }
+    // Recover HP while in cover
+    if (bot.lastDamageTime === 0 || this.game.time - bot.lastDamageTime > 4) {
+      bot.health = Math.min(bot.maxHealth, bot.health + 5 * (1 / 60));
+    }
     bot.peekTimer -= 1 / 60;
     if (bot.peekTimer <= 0) {
       if (closest && closest.alive && dist < bot.weaponRange) {
@@ -226,15 +387,52 @@ class AIController {
     }
   }
 
+  findFlankPosition(bot, enemy) {
+    let etx = enemy.tileX;
+    let ety = enemy.tileY;
+    // Check tiles in a ring around the enemy (radius 2-6 tiles)
+    let dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    for (let r = 2; r <= 6; r++) {
+      // Shuffle directions for variety
+      let shuffled = [...dirs].sort(() => Math.random() - 0.5);
+      for (let [dx, dy] of shuffled) {
+        let fx = etx + dx * r;
+        let fy = ety + dy * r;
+        if (!this.game.map.isWalkable(fx, fy)) continue;
+        // Check LOS from this position to the enemy
+        if (this.game.map.hasLineOfSight(fx, fy, etx, ety)) {
+          // Check it's within weapon range
+          let fpx = fx * TILE + TILE / 2;
+          let fpy = fy * TILE + TILE / 2;
+          let d = Math.sqrt((bot.x - fpx) ** 2 + (bot.y - fpy) ** 2);
+          if (d < bot.weaponRange * 1.2) {
+            return { x: fx, y: fy };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   doFleeing(bot) {
-    let fleeTarget = this.findFleePosition(bot);
-    if (fleeTarget) {
-      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, fleeTarget.x, fleeTarget.y) || [];
-      bot.pathIndex = 0;
-      this.moveAlongPath(bot);
+    // Gradual recovery: regenerate HP when out of combat
+    if (bot.lastDamageTime === 0 || this.game.time - bot.lastDamageTime > 4) {
+      bot.health = Math.min(bot.maxHealth, bot.health + 5 * (1 / 60));
     }
     if (bot.health > 50 && Math.random() < 0.01) {
       bot.state = STATES.EXPLORING;
+      return;
+    }
+    // Only compute new path when needed
+    if (!bot.path || bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
+      let fleeTarget = this.findFleePosition(bot);
+      if (fleeTarget) {
+        bot.path = this.game.map.aStar(bot.tileX, bot.tileY, fleeTarget.x, fleeTarget.y) || [];
+        bot.pathIndex = 0;
+      }
+    }
+    if (bot.path && bot.path.length > 0 && bot.pathIndex < bot.path.length) {
+      this.moveAlongPath(bot);
     }
   }
 
@@ -298,6 +496,12 @@ class AIController {
       return;
     }
     let target = bot.path[bot.pathIndex];
+    // Skip cover tiles in the path — they're walkable for A* but blocked for movement
+    while (this.game.map.isCover(target.x, target.y) && bot.pathIndex < bot.path.length) {
+      bot.pathIndex++;
+      target = bot.path[bot.pathIndex];
+    }
+    if (!target) { bot.path = []; return; }
     let tx = target.x * TILE + TILE / 2;
     let ty = target.y * TILE + TILE / 2;
     let dx = tx - bot.x;
@@ -309,8 +513,15 @@ class AIController {
     }
     let moveX = (dx / d) * bot.speed * (1 / 60);
     let moveY = (dy / d) * bot.speed * (1 / 60);
+    let oldX = bot.x;
+    let oldY = bot.y;
     this.tryMove(bot, moveX, moveY);
-    bot.direction = Math.atan2(dy, dx);
+    // If completely blocked on this path step, skip to next
+    if (Math.abs(bot.x - oldX) < 0.1 && Math.abs(bot.y - oldY) < 0.1) {
+      bot.pathIndex++;
+      return;
+    }
+    bot.direction = Math.atan2(ty - bot.y, tx - bot.x);
   }
 
   tryMove(bot, dx, dy) {
@@ -329,9 +540,11 @@ class AIController {
       let ty = Math.floor(c.y / TILE);
       if (this.game.map.isBlocked(tx, ty)) { blocked = true; break; }
     }
+    let moved = false;
     if (!blocked) {
       bot.x = nx;
       bot.y = ny;
+      moved = true;
     } else {
       let nx2 = bot.x + dx;
       let corners2 = [
@@ -346,23 +559,27 @@ class AIController {
         let ty = Math.floor(c.y / TILE);
         if (this.game.map.isBlocked(tx, ty)) { blockedX = true; break; }
       }
-      if (!blockedX) { bot.x = nx2; return; }
+      if (!blockedX) { bot.x = nx2; moved = true; }
 
-      let ny2 = bot.y + dy;
-      let corners3 = [
-        {x: bot.x - margin, y: ny2 - margin},
-        {x: bot.x + margin, y: ny2 - margin},
-        {x: bot.x - margin, y: ny2 + margin},
-        {x: bot.x + margin, y: ny2 + margin}
-      ];
-      let blockedY = false;
-      for (let c of corners3) {
-        let tx = Math.floor(c.x / TILE);
-        let ty = Math.floor(c.y / TILE);
-        if (this.game.map.isBlocked(tx, ty)) { blockedY = true; break; }
+      if (!moved) {
+        let ny2 = bot.y + dy;
+        let corners3 = [
+          {x: bot.x - margin, y: ny2 - margin},
+          {x: bot.x + margin, y: ny2 - margin},
+          {x: bot.x - margin, y: ny2 + margin},
+          {x: bot.x + margin, y: ny2 + margin}
+        ];
+        let blockedY = false;
+        for (let c of corners3) {
+          let tx = Math.floor(c.x / TILE);
+          let ty = Math.floor(c.y / TILE);
+          if (this.game.map.isBlocked(tx, ty)) { blockedY = true; break; }
+        }
+        if (!blockedY) { bot.y = ny2; moved = true; }
       }
-      if (!blockedY) { bot.y = ny2; }
     }
+    // Footsteps make quiet noise
+    if (moved) bot.noiseLevel = Math.max(bot.noiseLevel, 50);
   }
 
   shoot(bot, target) {
@@ -372,6 +589,8 @@ class AIController {
     let bullet = new Bullet(bot.x, bot.y, tx, ty, bot);
     this.game.bullets.push(bullet);
     bot.direction = Math.atan2(ty - bot.y, tx - bot.x);
+    // Shooting is loud
+    bot.noiseLevel = 300;
     this.resolveBullet(bullet);
   }
 
@@ -418,6 +637,7 @@ class AIController {
       hitBot.attacker = bullet.shooter;
       hitBot.lastEnemyPos = { x: bullet.shooter.x, y: bullet.shooter.y };
       hitBot.target = bullet.shooter;
+      hitBot.lastDamageTime = this.game.time;
       this.game.log.add(`${bullet.shooter.name} hit ${hitBot.name} for ${damage.toFixed(0)} dmg`, 'hit');
 
       if (hitBot.health <= 0) {
@@ -433,8 +653,17 @@ class AIController {
         if (hitBot.health < 30 || hitBot.personality === 'Coward') {
           hitBot.state = STATES.SEEKING_COVER;
           this.game.log.add(`${hitBot.name} seeks cover`, 'cover');
+        } else if (hitBot.personality === 'Sniper') {
+          // Snipers prefer to reposition and shoot from range
+          hitBot.state = Math.random() < 0.5 ? STATES.SEEKING_COVER : STATES.ATTACKING;
         } else {
-          hitBot.state = STATES.ATTACKING;
+          // Aggressive bots fight back, others flip-flop based on distance
+          let dist = this.game.dist(hitBot, bullet.shooter);
+          if (dist < hitBot.weaponRange * 0.8) {
+            hitBot.state = STATES.ATTACKING;
+          } else {
+            hitBot.state = Math.random() < 0.5 ? STATES.SEEKING_COVER : STATES.ATTACKING;
+          }
         }
       }
     }
@@ -442,20 +671,39 @@ class AIController {
 
   recoverFromStuck(bot) {
     bot.stuckTimer = 0;
+    // First try: find any walkable tile nearby via BFS
     let dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
     let best = null;
-    for (let [dx, dy] of dirs) {
-      let nx = bot.tileX + dx * 2;
-      let ny = bot.tileY + dy * 2;
-      if (this.game.map.isWalkable(nx, ny)) {
-        best = {x: nx, y: ny};
-        break;
+    for (let r = 1; r <= 4; r++) {
+      for (let [dx, dy] of dirs) {
+        let nx = bot.tileX + dx * r;
+        let ny = bot.tileY + dy * r;
+        if (this.game.map.isWalkable(nx, ny) && !this.game.map.isCover(nx, ny)) {
+          best = {x: nx, y: ny};
+          break;
+        }
       }
+      if (best) break;
     }
     if (best) {
-      bot.path = this.game.map.bfs(bot.tileX, bot.tileY, best.x, best.y) || [];
+      bot.path = this.game.map.aStar(bot.tileX, bot.tileY, best.x, best.y) || [];
       bot.pathIndex = 0;
     } else {
+      // Last resort: teleport to nearest walkable floor tile
+      for (let r = 1; r <= 6; r++) {
+        for (let [dx, dy] of dirs) {
+          let nx = bot.tileX + dx * r;
+          let ny = bot.tileY + dy * r;
+          if (this.game.map.isWalkable(nx, ny) && !this.game.map.isCover(nx, ny)) {
+            bot.x = nx * TILE + TILE / 2;
+            bot.y = ny * TILE + TILE / 2;
+            bot.lastMoveX = bot.x;
+            bot.lastMoveY = bot.y;
+            bot.path = [];
+            return;
+          }
+        }
+      }
       bot.path = [];
     }
   }

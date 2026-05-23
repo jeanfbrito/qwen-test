@@ -118,6 +118,8 @@ class Game {
     }
   }
 
+  get time() { return this.matchTime; }
+
   dist(a, b) {
     return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
   }

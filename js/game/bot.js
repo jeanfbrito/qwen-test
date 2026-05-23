@@ -36,6 +36,12 @@ class Bot {
     this.deathKiller = null;
     this.lastShotTime = 0;
     this.shotAccuracy = 0.7 + Math.random() * 0.25;
+    // Hearing
+    this.hearingRadius = 400 + Math.random() * 160;
+    this.heardEnemy = null;
+    this.lastDamageTime = 0;
+    this.heardEnemyPos = null;
+    this.noiseLevel = 0; // current noise emitted by this bot
   }
 }
 
