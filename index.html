@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tactical Bot Shooter</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="top-bar">
+  <button id="btn-start">Start</button>
+  <button id="btn-pause">Pause</button>
+  <button id="btn-restart">Restart</button>
+  <label>Speed: <input type="range" id="speed-slider" min="1" max="10" value="3"> <span id="speed-val">3x</span></label>
+  <label><input type="checkbox" id="debug-check"> Debug</label>
+  <span class="stat">Timer: <span id="timer">0:00</span></span>
+  <span class="stat">Alive: <span id="alive-count">0</span>/10</span>
+  <span class="stat">Seed: <span id="seed-display">-</span></span>
+</div>
+<div id="main">
+  <div id="canvas-wrap"><canvas id="game-canvas"></canvas></div>
+  <div id="sidebar">
+    <div id="bots-panel"><h3>Bots</h3><div id="bot-list"></div></div>
+    <div id="log-panel"><h3>Event Log</h3><div id="log-list"></div></div>
+  </div>
+</div>
+<div id="ranking-overlay">
+  <div id="ranking-box">
+    <h2>Match Over</h2>
+    <div class="winner-name" id="winner-display"></div>
+    <table id="ranking-table"></table>
+    <button id="btn-close-ranking">Close</button>
+  </div>
+</div>
+
+<script type="module" src="js/main.js?v=2"></script>
+</body>
+</html>

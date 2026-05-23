@@ -1,0 +1,13 @@
+export const TILE = 32;
+export const MAP_W = 50;
+export const MAP_H = 38;
+export const CANVAS_W = MAP_W * TILE;
+export const CANVAS_H = MAP_H * TILE;
+export const PERSONALITIES = ['Aggressive', 'Defensive', 'Coward', 'Balanced', 'Sniper'];
+export const BOT_NAMES = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliet'];
+export const BOT_COLORS = ['#ff6b6b','#ffa502','#ffdd59','#7bed9f','#70a1ff','#5352ed','#a55eea','#ff6348','#2ed573','#e056fd'];
+export const STATES = { EXPLORING:0, SEEKING_ENEMY:1, CHASING:2, ATTACKING:3, SEEKING_COVER:4, IN_COVER:5, FLEEING:6, DEAD:7 };
+export const STATE_NAMES = ['EXPLORING','SEEKING_ENEMY','CHASING','ATTACKING','SEEKING_COVER','IN_COVER','FLEEING','DEAD'];
+export const TILE_FLOOR = 0;
+export const TILE_WALL = 1;
+export const TILE_COVER = 2;

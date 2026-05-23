@@ -1,0 +1,40 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#top-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #16213e; border-bottom: 1px solid #0f3460; flex-wrap: wrap; }
+#top-bar button { padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+#btn-start { background: #e94560; color: white; }
+#btn-pause { background: #f0a500; color: #1a1a2e; }
+#btn-restart { background: #533483; color: white; }
+#top-bar label { font-size: 13px; display: flex; align-items: center; gap: 4px; }
+#top-bar input[type=range] { width: 80px; }
+#top-bar .stat { font-size: 13px; color: #a0a0c0; }
+#main { display: flex; flex: 1; overflow: hidden; }
+#canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 8px; }
+canvas { background: #0a0a1a; border: 1px solid #0f3460; border-radius: 4px; }
+#sidebar { width: 320px; display: flex; flex-direction: column; border-left: 1px solid #0f3460; background: #16213e; overflow: hidden; }
+#bots-panel { flex: 1; overflow-y: auto; padding: 8px; }
+#bots-panel h3 { font-size: 13px; color: #a0a0c0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+.bot-card { background: #1a1a2e; border-radius: 4px; padding: 6px 8px; margin-bottom: 4px; font-size: 11px; border-left: 3px solid #555; }
+.bot-card.dead { opacity: 0.45; }
+.bot-card .bot-name { font-weight: 700; font-size: 12px; }
+.bot-card .bot-info { display: flex; justify-content: space-between; color: #888; margin-top: 2px; }
+.bot-card .health-bar { height: 4px; background: #333; border-radius: 2px; margin-top: 3px; }
+.bot-card .health-fill { height: 100%; border-radius: 2px; transition: width 0.2s; }
+#log-panel { height: 160px; border-top: 1px solid #0f3460; overflow-y: auto; padding: 6px 8px; background: #0d1117; }
+#log-panel h3 { font-size: 12px; color: #a0a0c0; margin-bottom: 4px; }
+.log-entry { font-size: 11px; color: #8b949e; margin-bottom: 2px; font-family: monospace; }
+.log-entry.kill { color: #e94560; }
+.log-entry.hit { color: #f0a500; }
+.log-entry.cover { color: #58a6ff; }
+.log-entry.win { color: #3fb950; font-weight: bold; }
+#ranking-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+#ranking-overlay.show { display: flex; }
+#ranking-box { background: #16213e; border: 2px solid #e94560; border-radius: 8px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; }
+#ranking-box h2 { text-align: center; color: #e94560; margin-bottom: 4px; }
+#ranking-box .winner-name { text-align: center; font-size: 20px; color: #f0a500; margin-bottom: 12px; }
+#ranking-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#ranking-table th { background: #0d1117; padding: 6px 4px; text-align: left; color: #a0a0c0; font-size: 11px; }
+#ranking-table td { padding: 5px 4px; border-bottom: 1px solid #21262d; }
+#ranking-table tr:first-child td { color: #f0a500; font-weight: bold; }
+#ranking-table .most-kills { color: #e94560; }
+#btn-close-ranking { display: block; margin: 12px auto 0; padding: 8px 24px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
